@@ -1,0 +1,7 @@
+__pycache__
+dist
+*.pyc
+venv
+.env
+.coverage
+deprecated

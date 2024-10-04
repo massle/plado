@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.isort]
+profile = "black"
+
+[tool.black]
+preview = true
+unstable = true
+
+[tool.pylint.messages_control]
+max-line-length = 100
+disable = "C0114,C0115,C0116,R0903,W0212,C0302,R0913"
+
+[tool.pytest.ini_options]
+pythonpath = [
+  "."
+]
+
+[project]
+name = "plado"
+version = "0.1"
+authors = [
+    { name="Marcel Steinmetz", email="ma.steinm@gmail.com" },
+]
+description = "Python utils for lifted PDDL planning, including PDDL parser and lifted successor generation."
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/massle/plado"
+Issues = "https://github.com/massle/plado/issues"
