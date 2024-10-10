@@ -20,7 +20,7 @@ pythonpath = [
 
 [project]
 name = "plado"
-version = "0.1"
+version = "0.1.1"
 authors = [
     { name="Marcel Steinmetz", email="ma.steinm@gmail.com" },
 ]

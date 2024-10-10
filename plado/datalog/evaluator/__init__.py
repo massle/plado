@@ -8,6 +8,7 @@ from plado.datalog.evaluator.compiler import (
     compile_without_dependencies,
 )
 from plado.datalog.evaluator.filtering import (
+    insert_constraint_predicate,
     insert_filter_predicates,
     insert_projections,
 )
@@ -76,11 +77,13 @@ def _generate_query_tree(
 ) -> QNode:
     jg = construct_join_graph(clause.num_variables, clause.positive, clause.negative)
     planner = GreedyOptimizer(cost_function)
-    qnode = planner(jg)
+    qnode = insert_filter_predicates(
+        clause.vars_eq, clause.vars_neq, clause.obj_eq, clause.obj_neq, planner(jg)
+    )
+    for constraint in clause.constrants:
+        qnode = insert_constraint_predicate(constraint, qnode)
     return insert_projections(
-        insert_filter_predicates(
-            clause.vars_eq, clause.vars_neq, clause.obj_eq, clause.obj_neq, qnode
-        ),
+        qnode,
         set((arg.id for arg in clause.head.arguments)),
     )
 
@@ -183,7 +186,7 @@ def _get_query_engine_code(
                         clause.head.relation_id,
                         tuple((arg.id for arg in clause.head.arguments)),
                         query_trees[idx],
-                        num_relations
+                        num_relations,
                     )
                 )
     evaluator_code = "\n".join(evaluator_code)

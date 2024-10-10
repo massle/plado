@@ -226,11 +226,14 @@ class DelInstruction(InstructionNode):
 
 
 def get_fluent_arguments(fluent: datalog.Fluent, get_value: VariableSubscripts) -> str:
-    return f"({', '.join((get_value(arg.id for arg in fluent.args)))},)"
+    args = [None] * len(fluent.args)
+    for var, pos in fluent.variables:
+        args[pos] = var
+    return f"({', '.join((get_value(arg) for arg in args))},)"
 
 
 def get_fluent(fluent_id: int, fluent_args: str) -> str:
-    return f"{FLUENTS}[{fluent_id}][{fluent_args}]"
+    return f"{FLUENTS}[{fluent_id}].get({fluent_args}, None)"
 
 
 AbstractDatabase = Callable[[int], str]
@@ -327,10 +330,10 @@ class NumericConstraint(Predicate):
             datalog.NumericConstraint.LESS_EQUAL: "<=",
             datalog.NumericConstraint.EQUAL: "==",
         }[self.constraint.comparator]
-        expr = self.constraint.accept(visitor)
+        expr = self.constraint.expr.accept(visitor)
         constraint = f"{expr} {comparator} 0"
         not_none = (f"{fluent} is not None" for fluent in visitor.fluents)
-        return "and ".join(itertools.chain(not_none, [constraint]))
+        return " and ".join(itertools.chain(not_none, [constraint]))
 
 
 class And(Predicate):

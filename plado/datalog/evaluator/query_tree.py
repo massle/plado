@@ -289,6 +289,9 @@ class NumericConditionNode(WrappingNode):
         super().__init__(child)
         self.constraint: NumericConstraint = constraint
 
+    def __str__(self) -> str:
+        return (f"[{str(self.child)} where {str(self.constraint)}]")
+
     def accept(self, visitor: "QueryTreeVisitor") -> Any:
         return visitor.visit_numeric(self)
 

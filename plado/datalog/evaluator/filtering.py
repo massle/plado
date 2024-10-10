@@ -95,7 +95,7 @@ def insert_projections(node: QNode, args: set[int]) -> QNode:
         node = node.__class__(
             insert_projections(node.left, common_args),
             insert_projections(node.right, common_args),
-            node.cost
+            node.cost,
         )
     p_args = args & set(node.get_argument_map().keys())
     if len(p_args) != len(node.get_argument_map()):
