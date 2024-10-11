@@ -30,7 +30,7 @@ class Problem:
 
     def dump(self) -> str:
         return CR.join([
-            f"(problem {self.name}",
+            f"(define (problem {self.name})",
             f"(:domain {self.domain_name})",
             f"(:objects {' '.join((str(o) for o in self.objects))})",
             "(:init",
@@ -39,5 +39,6 @@ class Problem:
             "(:goal",
             f"  {self.goal.dump(1)}",
             ")",
-            f"{self.metric.dump(0) if self.metric else ''})",
+            f"{self.metric.dump(0) if self.metric else ''}",
+            ")"
         ])

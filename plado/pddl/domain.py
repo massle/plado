@@ -32,16 +32,26 @@ class Domain:
         self.derived_predicates: tuple[DerivedPredicate] = tuple(derived_predicates)
 
     def dump(self) -> str:
-        return CR.join([
-            f"(domain {self.name}",
-            f"(:requirements {' '.join(self.requirements)})",
-            "(:types",
-            CR.join((f"  {str(t)}" for t in self.types)),
-            f"(:constants {' '.join((str(o) for o in self.constants))})",
-            "(:predicates",
-            CR.join((f"  {str(p)}" for p in self.predicates)),
-            "(:functions",
-            CR.join((f"  {str(p)}" for p in self.functions)),
-            CR.join((p.dump(0) for p in self.derived_predicates)),
-            CR.join((a.dump(0) for a in self.actions)),
-        ])
+        result = [
+            f"(define (domain {self.name})",
+        ]
+        if len(self.requirements) > 0:
+            result.append(f"(:requirements {' '.join(self.requirements)})")
+        if len(self.types) > 0:
+            result.append("(:types")
+            result.append(CR.join((f"  {str(t)}" for t in self.types)))
+            result.append(")")
+        if len(self.constants) > 0:
+            result.append(f"(:constants {' '.join((str(o) for o in self.constants))})")
+        if len(self.predicates) > 0:
+            result.append("(:predicates")
+            result.append(CR.join((f"  {str(p)}" for p in self.predicates)))
+            result.append(")")
+        if len(self.functions) > 0:
+            result.append("(:functions")
+            result.append(CR.join((f"  {str(p)}" for p in self.functions)))
+            result.append(")")
+        result.append(CR.join((p.dump(0) for p in self.derived_predicates)))
+        result.append(CR.join((a.dump(0) for a in self.actions)))
+        result.append(")")
+        return CR.join(result)

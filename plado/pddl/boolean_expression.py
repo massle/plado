@@ -187,6 +187,9 @@ class BooleanConnector(BooleanExpression):
             CR.join(
                 (" " * (level * 2 + 2) + c.dump(level + 1) for c in self.sub_formulas)
             ),
+            "\n",
+            " " * (level * 2),
+            ")",
         ])
 
 

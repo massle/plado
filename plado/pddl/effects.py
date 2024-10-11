@@ -111,6 +111,7 @@ class ConjunctiveEffect(ActionEffect):
             CR.join((" " * (level * 2 + 2) + e.dump(level + 1) for e in self.effects)),
             CR,
             " " * (level * 2),
+            ")",
         ])
 
 
@@ -258,6 +259,9 @@ class ProbabilisticEffect(ActionEffect):
         return "".join([
             "(probabilistic\n",
             CR.join((" " * (level * 2 + 2) + o.dump(level + 1) for o in self.outcomes)),
+            "\n",
+            (" " * (level * 2)),
+            ")",
         ])
 
 
