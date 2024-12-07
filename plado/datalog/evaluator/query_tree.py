@@ -290,7 +290,7 @@ class NumericConditionNode(WrappingNode):
         self.constraint: NumericConstraint = constraint
 
     def __str__(self) -> str:
-        return (f"[{str(self.child)} where {str(self.constraint)}]")
+        return f"[{str(self.child)} where {str(self.constraint)}]"
 
     def accept(self, visitor: "QueryTreeVisitor") -> Any:
         return visitor.visit_numeric(self)
@@ -315,6 +315,27 @@ class ProjectionNode(WrappingNode):
         return (
             f"[{str(self.child)}] project onto"
             f" {', '.join((f'?x{i}' for i in self.projection))}"
+        )
+
+
+GroundAtomRef = NamedTuple(
+    "GroundAtomRef", [("relation", int), ("objects", tuple[int])]
+)
+
+
+class GroundAtomsNode(WrappingNode):
+    def __init__(self, child: QNode, atoms: Iterable[GroundAtomRef], negative: bool):
+        super().__init__(child)
+        self.atoms: tuple[GroundAtomRef] = tuple(atoms)
+        self.negative: bool = negative
+
+    def accept(self, visitor: "QueryTreeVisitor") -> Any:
+        return visitor.visit_ground_atoms(self)
+
+    def __str__(self) -> str:
+        return (
+            f"[{str(self.child)}] if "
+            f"{', '.join((f'{args} in R{rel}' for rel, args in self.atoms))}"
         )
 
 
@@ -365,6 +386,9 @@ class QueryTreeVisitor(ABC):
     def visit_empty_tuple(self, node: EmptyTupleNode) -> Any:
         return self.visit_generic(node)
 
+    def visit_ground_atoms(self, node: GroundAtomsNode) -> Any:
+        return self.visit_generic(node)
+
 
 class QueryTreeTransformer(QueryTreeVisitor):
 
@@ -405,3 +429,6 @@ class QueryTreeTransformer(QueryTreeVisitor):
 
     def visit_numeric(self, node: NumericConditionNode) -> QNode:
         return node.__class__(node.child.accept(self), node.constraint)
+
+    def visit_ground_atoms(self, node: GroundAtomsNode) -> Any:
+        return GroundAtomsNode(node.child.accept(self), node.atoms, node.negative)

@@ -73,7 +73,7 @@ def test_clause_normalization():
     assert len(normalized.vars_neq) == 1 and (0, 1) in normalized.vars_neq
     assert len(normalized.obj_eq) == 1 and (0, 0) in normalized.obj_eq
     assert len(normalized.obj_neq) == 1 and (0, 0) in normalized.obj_neq
-    assert len(normalized.constrants) == 0
+    assert len(normalized.constraints) == 0
     assert normalized.num_variables == 2
 
 
@@ -199,7 +199,7 @@ def test_qt_compilation_product(TakeProductRules):
     # code = evaluator.compile_without_dependencies(
     #     0, (0, 1), evaluator._generate_query_tree(TakeProductRules[0])
     # )
-    compiled = evaluator._get_query_engine_code(5, TakeProductRules)
+    _, compiled = evaluator._get_query_engine_code(5, TakeProductRules)
     a = set((tuple([i]) for i in range(0, 10, 2)))
     b = set((tuple([i]) for i in range(1, 10, 2)))
     env = {
@@ -241,7 +241,7 @@ def test_qt_generation_join(JoinRules):
 
 
 def test_qt_compilation_join(JoinRules):
-    compiled = evaluator._get_query_engine_code(5, JoinRules)
+    _, compiled = evaluator._get_query_engine_code(5, JoinRules)
     env = {
         evaluator.FLUENTS: [],
         evaluator.RELATIONS: [
@@ -272,7 +272,7 @@ def JoinRulesWithDiff() -> list[evaluator.NormalizedClause]:
 
 
 def test_qt_compilation_join_with_diff(JoinRulesWithDiff):
-    compiled = evaluator._get_query_engine_code(6, JoinRulesWithDiff)
+    _, compiled = evaluator._get_query_engine_code(6, JoinRulesWithDiff)
     env = {
         evaluator.FLUENTS: [],
         evaluator.RELATIONS: [
@@ -338,7 +338,7 @@ def test_qt_generation_join_with_filters(JoinWithFilter):
 
 
 def test_qt_compilation_joint_with_filters_empty(JoinWithFilter):
-    compiled = evaluator._get_query_engine_code(6, JoinWithFilter)
+    _, compiled = evaluator._get_query_engine_code(6, JoinWithFilter)
     env = {
         evaluator.FLUENTS: [],
         evaluator.RELATIONS: [
@@ -355,7 +355,7 @@ def test_qt_compilation_joint_with_filters_empty(JoinWithFilter):
 
 
 def test_qt_compilation_joint_with_filters(JoinWithFilter):
-    compiled = evaluator._get_query_engine_code(6, JoinWithFilter)
+    _, compiled = evaluator._get_query_engine_code(6, JoinWithFilter)
     env = {
         evaluator.FLUENTS: [],
         evaluator.RELATIONS: [
@@ -388,7 +388,7 @@ def TransitiveClosure():
 
 
 def test_evaluation_closure(TransitiveClosure):
-    compiled = evaluator._get_query_engine_code(4, TransitiveClosure)
+    _, compiled = evaluator._get_query_engine_code(4, TransitiveClosure)
     env = {
         evaluator.FLUENTS: [],
         evaluator.RELATIONS: [

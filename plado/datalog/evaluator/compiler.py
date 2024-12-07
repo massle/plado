@@ -4,6 +4,8 @@ from collections.abc import Callable, Iterable
 import plado.datalog.numeric as datalog
 from plado.datalog.evaluator.query_tree import (
     DifferenceNode,
+    GroundAtomRef,
+    GroundAtomsNode,
     JoinNode,
     LeafNode,
     NumericConditionNode,
@@ -551,17 +553,25 @@ class PrebuiltHashSet:
         raise NotImplementedError()
 
 
+def _and(*conjuncts: str | None) -> str:
+    return " and ".join((c for c in conjuncts if c is not None))
+
+
 class PrebuiltHashSetRegister(PrebuiltHashSet):
     def __init__(self, register_id: int, relation_args: tuple[int]):
         self.register_id: int = register_id
         self.relation_args: tuple[int] = relation_args
+        self.condition: str = None
 
     def make_is_not_in(self, handle: TupleHandle) -> TupleHandle:
         def handle_(subscripts: Subscriptor):
             return ConditionalInstruction(
                 handle(subscripts),
-                f"{subscripts.get_tuple(self.relation_args)} not in"
-                f" {get_register(self.register_id)}",
+                _and(
+                    f"{subscripts.get_tuple(self.relation_args)} not in"
+                    f" {get_register(self.register_id)}",
+                    self.condition,
+                ),
             )
 
         return handle_
@@ -573,12 +583,15 @@ class PrebuiltHashSetRegister(PrebuiltHashSet):
 
         def handle_wrapper(subscripts: Subscriptor):
             subscripts.associate(register_id, self.relation_args, Subscriptor.HIGH)
-            return ForLoop(
+            loop = ForLoop(
                 get_register(register_id),
                 get_register(self.register_id),
                 None,
                 handle(subscripts),
             )
+            if self.condition:
+                return ConditionalInstruction(loop, self.condition)
+            return loop
 
         return handle_wrapper
 
@@ -591,12 +604,15 @@ class ConstantHashSetRelation(PrebuiltHashSet):
         self.tupl: str = tupl
         self.relation: str = relation
         self.relation_args: tuple[int] = relation_args
+        self.condition: str = None
 
     def make_is_not_in(self, handle: TupleHandle) -> TupleHandle:
         def handle_wrapper(subscripts: Subscriptor):
             tupl: str = subscripts.get_tuple(self.relation_args)
             cond = f"{tupl} != {self.tupl}"
-            return ConditionalInstruction(handle(subscripts), cond)
+            return ConditionalInstruction(
+                handle(subscripts), _and(cond, self.condition)
+            )
 
         return handle_wrapper
 
@@ -611,7 +627,7 @@ class ConstantHashSetRelation(PrebuiltHashSet):
                 InstructionSequence(
                     [Assign(get_register(register_id), self.tupl), handle(subscripts)]
                 ),
-                f"{self.tupl} in {self.relation}",
+                _and(f"{self.tupl} in {self.relation}", self.condition),
             )
 
         return handle_wrapper
@@ -627,6 +643,7 @@ class PrebuiltHashSetRelation(PrebuiltHashSet):
         self.relation: str = relation
         self.relation_args: tuple[int] = relation_args
         self.predicate: PredicateNode | None = predicate
+        self.condition: str = None
 
     def make_is_not_in(self, handle: TupleHandle) -> TupleHandle:
         def handle_wrapper(subscripts: Subscriptor):
@@ -637,7 +654,9 @@ class PrebuiltHashSetRelation(PrebuiltHashSet):
                     f"{make_condition(self.predicate, tupl, self.relation_args)}"
                     f" and {cond}"
                 )
-            return ConditionalInstruction(handle(subscripts), cond)
+            return ConditionalInstruction(
+                handle(subscripts), _and(cond, self.condition)
+            )
 
         return handle_wrapper
 
@@ -648,7 +667,7 @@ class PrebuiltHashSetRelation(PrebuiltHashSet):
 
         def handle_wrapper(subscripts: Subscriptor):
             subscripts.associate(register_id, self.relation_args, Subscriptor.HIGH)
-            return ForLoop(
+            loop = ForLoop(
                 get_register(register_id),
                 self.relation,
                 make_condition(
@@ -656,6 +675,9 @@ class PrebuiltHashSetRelation(PrebuiltHashSet):
                 ),
                 handle(subscripts),
             )
+            if self.condition:
+                return ConditionalInstruction(loop, self.condition)
+            return loop
 
         return handle_wrapper
 
@@ -678,6 +700,7 @@ class PrebuiltHashMapRegister(PrebuiltHashMap):
         self.register_id: int = register_id
         self.key_args: tuple[int] = key_args
         self.value_args: tuple[int] = value_args
+        self.condition: str = None
 
     def make_loop_handle(
         self, register_id: int, subscripts: Subscriptor, handle: TupleHandle
@@ -687,12 +710,15 @@ class PrebuiltHashMapRegister(PrebuiltHashMap):
         def handle_wrapper(subscripts: Subscriptor):
             tupl: str = subscripts.get_tuple(self.key_args)
             subscripts.associate(register_id, self.value_args, Subscriptor.LOW)
-            return ForLoop(
+            loop = ForLoop(
                 get_register(register_id),
                 f"{get_register(self.register_id)}.get({tupl}, [])",
                 None,
                 handle(subscripts),
             )
+            if self.condition:
+                return ConditionalInstruction(loop, self.condition)
+            return loop
 
         return handle_wrapper
 
@@ -707,6 +733,7 @@ class PrebuiltHashMapRelation(PrebuiltHashMap):
         self.relation: str = relation
         self.relation_args: tuple[int] = relation_args
         self.predicate: PredicateNode | None = predicate
+        self.condition: str = None
 
     def make_loop_handle(
         self, register_id: int, subscripts: Subscriptor, handle: TupleHandle
@@ -719,7 +746,9 @@ class PrebuiltHashMapRelation(PrebuiltHashMap):
                     f"{condition} and"
                     f" {make_condition(self.predicate, tupl, self.relation_args)}"
                 )
-            return ConditionalInstruction(handle(subscripts), condition)
+            return ConditionalInstruction(
+                handle(subscripts), _and(condition, self.condition)
+            )
 
         return handle_wrapper
 
@@ -794,6 +823,126 @@ class EvalBuilder:
             ),
             "]",
         ])
+
+
+class BuilderCondition:
+    def has_dynamic_dependency(self, dynamic_relations: set[int]) -> bool:
+        raise NotImplementedError()
+
+    def generate(self, database: AbstractDatabase) -> str:
+        raise NotImplementedError()
+
+
+class GroundAtomCondition(BuilderCondition):
+    def __init__(self, relation: int, objects: Iterable[int]):
+        self.relation: int = relation
+        self.objects: tuple[int] = tuple(objects)
+
+    def has_dynamic_dependency(self, dynamic_relations: set[int]) -> bool:
+        return self.relation in dynamic_relations
+
+    def generate(self, database: AbstractDatabase) -> str:
+        return f"{self.objects} in {database(self.relation)}"
+
+
+class NegatedGroundAtomCondition(BuilderCondition):
+    def __init__(self, relation: int, objects: Iterable[int]):
+        self.relation: int = relation
+        self.objects: tuple[int] = tuple(objects)
+
+    def has_dynamic_dependency(self, dynamic_relations: set[int]) -> bool:
+        return self.relation in dynamic_relations
+
+    def generate(self, database: AbstractDatabase) -> str:
+        return f"{self.objects} not in {database(self.relation)}"
+
+
+class ConjunctiveCondition(BuilderCondition):
+    def __init__(self, conditions: Iterable[BuilderCondition]):
+        self.conditions: tuple[BuilderCondition] = tuple(conditions)
+
+    def has_dynamic_dependency(self, dynamic_relations: set[int]) -> bool:
+        return any(
+            (cond.has_dynamic_dependency(dynamic_relations) for cond in self.conditions)
+        )
+
+    def generate(self, database: AbstractDatabase) -> str:
+        return _and(*(cond.generate(database) for cond in self.conditions))
+
+
+class ConditionalBuilder(EvalBuilder):
+    def __init__(self, condition: BuilderCondition, builder: EvalBuilder):
+        super().__init__(builder.predicate, builder.projection)
+        self.condition: BuilderCondition = condition
+        self.child: EvalBuilder = builder
+
+    def store_child(self, child: EvalBuilder) -> bool:
+        return self.child.store_child(child)
+
+    def is_complete(self) -> bool:
+        return self.child.is_complete()
+
+    def has_dynamic_dependency(self, dynamic_relations: set[int]) -> bool:
+        return self.condition.has_dynamic_dependency(
+            dynamic_relations
+        ) or self.child.has_dynamic_dependency(dynamic_relations)
+
+    def get_arguments(self) -> tuple[int]:
+        return self.child.get_arguments()
+
+    def make_hash_index_set(
+        self,
+        build_data: BuildData,
+        program: Program,
+        database: AbstractDatabase,
+        index_args: tuple[int],
+    ) -> PrebuiltHashSet:
+        res = self.child.make_hash_index_set(build_data, program, database, index_args)
+        res.condition = _and(res.condition, self.condition.generate(database))
+        return res
+
+    def make_hash_index_map(
+        self,
+        build_data: BuildData,
+        program: Program,
+        database: AbstractDatabase,
+        index_args: tuple[int],
+    ) -> PrebuiltHashMap:
+        res = self.child.make_hash_index_map(
+            build_data,
+            program,
+            database,
+            index_args,
+        )
+        res.condition = _and(res.condition, self.condition.generate(database))
+        return res
+
+    def make_iteration(
+        self,
+        build_data: BuildData,
+        program: Program,
+        database: AbstractDatabase,
+        handle: TupleHandle,
+        subscripts: Subscriptor,
+    ):
+        idx: int = len(program.instructions)
+        self.child.make_iteration(
+            build_data,
+            program,
+            database,
+            handle,
+            subscripts,
+        )
+        instructions = program.instructions[idx:]
+        del program.instructions[idx:]
+        program.instructions.append(
+            ConditionalInstruction(
+                InstructionSequence(instructions), self.condition.generate(database)
+            )
+        )
+
+    def _dump(self) -> str:
+        return f"{str(self.child)} if {self.condition.generate(lambda x: f'R{x}')}"
 
 
 class BinOpBuilder(EvalBuilder):
@@ -1428,23 +1577,33 @@ class ExecutionTreeBuilder(QueryTreeVisitor):
     def __init__(self):
         self.code_generators: list[EvalBuilder] = []
         self._build_stack: list[EvalBuilder] = []
-        self._condition_stack: list[Predicate] = []
+        self._predicates: list[Predicate] = []
         self._projection: tuple[int] | None = None
+        self._conditions: list[BuilderCondition] = []
+
+    def visit_ground_atoms(self, node: GroundAtomsNode) -> None:
+        self._conditions.extend((
+            (NegatedGroundAtomCondition if node.negative else GroundAtomCondition)(
+                rel, objs
+            )
+            for (rel, objs) in node.atoms
+        ))
+        node.child.accept(self)
 
     def visit_equality(self, node: PredicateNode) -> None:
-        self._condition_stack.append(Equality(node.variable_id, node.value_ref))
+        self._predicates.append(Equality(node.variable_id, node.value_ref))
         node.child.accept(self)
 
     def visit_select(self, node: PredicateNode) -> None:
-        self._condition_stack.append(Select(node.variable_id, node.value_ref))
+        self._predicates.append(Select(node.variable_id, node.value_ref))
         node.child.accept(self)
 
     def visit_inequality(self, node: PredicateNode) -> None:
-        self._condition_stack.append(Inequality(node.variable_id, node.value_ref))
+        self._predicates.append(Inequality(node.variable_id, node.value_ref))
         node.child.accept(self)
 
     def visit_select_not(self, node: PredicateNode) -> None:
-        self._condition_stack.append(SelectNot(node.variable_id, node.value_ref))
+        self._predicates.append(SelectNot(node.variable_id, node.value_ref))
         node.child.accept(self)
 
     def visit_projection(self, node: ProjectionNode) -> None:
@@ -1452,19 +1611,27 @@ class ExecutionTreeBuilder(QueryTreeVisitor):
         node.child.accept(self)
 
     def visit_numeric(self, node: NumericConditionNode) -> None:
-        self._condition_stack.append(NumericConstraint(node.constraint))
+        self._predicates.append(NumericConstraint(node.constraint))
         node.child.accept(self)
 
     def _consume(self) -> None:
-        self._condition_stack.clear()
+        self._predicates.clear()
         self._projection = None
+        self._conditions.clear()
+
+    def _insert_condition(self, b: EvalBuilder) -> EvalBuilder:
+        if len(self._conditions) > 0:
+            return ConditionalBuilder(ConjunctiveCondition(self._conditions), b)
+        return b
 
     def visit_product(self, node: ProductNode) -> None:
         self._build_stack.append(
-            ProductBuilder(
-                tuple(node.get_argument_map().keys()),
-                conjoin(*self._condition_stack),
-                self._projection,
+            self._insert_condition(
+                ProductBuilder(
+                    tuple(node.get_argument_map().keys()),
+                    conjoin(*self._predicates),
+                    self._projection,
+                )
             )
         )
         self._consume()
@@ -1473,11 +1640,13 @@ class ExecutionTreeBuilder(QueryTreeVisitor):
 
     def visit_join(self, node: JoinNode) -> None:
         self._build_stack.append(
-            JoinBuilder(
-                tuple(node.shared_args),
-                tuple(node.get_argument_map().keys()),
-                conjoin(*self._condition_stack),
-                self._projection,
+            self._insert_condition(
+                JoinBuilder(
+                    tuple(node.shared_args),
+                    tuple(node.get_argument_map().keys()),
+                    conjoin(*self._predicates),
+                    self._projection,
+                )
             )
         )
         self._consume()
@@ -1486,10 +1655,12 @@ class ExecutionTreeBuilder(QueryTreeVisitor):
 
     def visit_difference(self, node: DifferenceNode) -> None:
         self._build_stack.append(
-            DifferenceBuilder(
-                tuple(node.shared_args),
-                conjoin(*self._condition_stack),
-                self._projection,
+            self._insert_condition(
+                DifferenceBuilder(
+                    tuple(node.shared_args),
+                    conjoin(*self._predicates),
+                    self._projection,
+                )
             )
         )
         self._consume()
@@ -1509,17 +1680,19 @@ class ExecutionTreeBuilder(QueryTreeVisitor):
             self.code_generators.append(node)
 
     def visit_empty_tuple(self, node) -> None:
-        node = EmptyTupleBuilder()
+        node = self._insert_condition(EmptyTupleBuilder())
         self._consume()
         self._backtrack(node)
 
     def visit_leaf(self, node: LeafNode) -> None:
         # Table scan node
-        node = RelationScanBuilder(
-            node.relation_id,
-            node.relation_args,
-            conjoin(*self._condition_stack),
-            self._projection,
+        node = self._insert_condition(
+            RelationScanBuilder(
+                node.relation_id,
+                node.relation_args,
+                conjoin(*self._predicates),
+                self._projection,
+            )
         )
         self._consume()
         self._backtrack(node)
@@ -1527,10 +1700,12 @@ class ExecutionTreeBuilder(QueryTreeVisitor):
     def visit_register(self, node: RegisterNode) -> None:
         # Table scan node
         assert self._projection is None
-        assert len(self._condition_stack) == 0
-        node = RegisterNode(
-            node.register_id,
-            node.relation_args,
+        assert len(self._predicates) == 0
+        node = self._insert_condition(
+            RegisterNode(
+                node.register_id,
+                node.relation_args,
+            )
         )
         self._consume()
         self._backtrack(node)

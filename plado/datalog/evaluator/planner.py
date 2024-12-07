@@ -263,7 +263,8 @@ class GreedyOptimizer:
         """
         self.jg = join_graph
         components: list[list[int]] = self._compute_components(self.jg)
-        assert len(components) > 0
+        if len(components) == 0:
+            return EmptyTupleNode()
         nodes: list[QNode] = [
             self._compute_join_ordering(component) for component in components
         ]

@@ -11,10 +11,10 @@ class GoalChecker:
         gc = Clause(Atom(self.gr, []), [], [], [])
         task.goal.condition.to_datalog(len(task.predicates), gc)
         program.add_clause(gc)
-        self.evalutor: DatalogEngine = DatalogEngine(program, len(task.objects))
+        self.evaluator: DatalogEngine = DatalogEngine(program, len(task.objects))
 
     def __call__(self, state: State) -> bool:
         atoms, fluents = self.task.prepare_for_query(state.atoms, state.fluents)
         atoms.append(set())
-        model = self.evalutor(atoms, fluents)
+        model = self.evaluator(atoms, fluents)
         return len(model[self.gr]) > 0

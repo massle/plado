@@ -94,6 +94,16 @@ class Atom:
             ),
         )
 
+    def substitute_(self, sub: Mapping[int, Constant]) -> "Atom":
+        """
+        Substitutes all variables according to the given substitution
+        mapping.
+        """
+        return Atom(
+            self.relation_id,
+            ((sub[arg.id] if arg.is_variable() else arg) for arg in self.arguments),
+        )
+
 
 class Clause:
     def __init__(

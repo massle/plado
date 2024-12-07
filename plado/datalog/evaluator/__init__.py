@@ -1,4 +1,5 @@
 import itertools
+import sys
 from collections.abc import Iterable
 
 from plado.datalog.evaluator.compiler import (
@@ -14,7 +15,7 @@ from plado.datalog.evaluator.filtering import (
 )
 from plado.datalog.evaluator.join_graph import construct_join_graph
 from plado.datalog.evaluator.planner import GreedyOptimizer
-from plado.datalog.evaluator.query_tree import QNode
+from plado.datalog.evaluator.query_tree import GroundAtomRef, GroundAtomsNode, QNode
 from plado.datalog.numeric import NumericConstraint
 from plado.datalog.program import Atom, Clause, Constant, DatalogProgram
 from plado.utils import Float, tarjan
@@ -36,6 +37,8 @@ class NormalizedClause:
         num_variables: int,
         positive: Iterable[Atom],
         negative: Iterable[Atom],
+        ground_positive: Iterable[GroundAtomRef],
+        ground_negative: Iterable[GroundAtomRef],
         vars_eq: Iterable[tuple[int, int]],
         vars_neq: Iterable[tuple[int, int]],
         obj_eq: Iterable[tuple[int, int]],
@@ -46,11 +49,13 @@ class NormalizedClause:
         self.head: Atom = head
         self.positive: tuple[Atom] = tuple(positive)
         self.negative: tuple[Atom] = tuple(negative)
+        self.ground_positive: tuple[GroundAtomRef] = tuple(ground_positive)
+        self.ground_negative: tuple[GroundAtomRef] = tuple(ground_negative)
         self.vars_eq = tuple(vars_eq)
         self.vars_neq = tuple(vars_neq)
         self.obj_eq = tuple(obj_eq)
         self.obj_neq = tuple(obj_neq)
-        self.constrants = tuple(constraints)
+        self.constraints = tuple(constraints)
         assert all((
             any(varid in atom.get_variables() for atom in self.positive)
             for varid in range(self.num_variables)
@@ -80,12 +85,17 @@ def _generate_query_tree(
     qnode = insert_filter_predicates(
         clause.vars_eq, clause.vars_neq, clause.obj_eq, clause.obj_neq, planner(jg)
     )
-    for constraint in clause.constrants:
+    for constraint in clause.constraints:
         qnode = insert_constraint_predicate(constraint, qnode)
-    return insert_projections(
+    qnode = insert_projections(
         qnode,
         set((arg.id for arg in clause.head.arguments)),
     )
+    if len(clause.ground_negative) > 0:
+        qnode = GroundAtomsNode(qnode, clause.ground_negative, True)
+    if len(clause.ground_positive) > 0:
+        qnode = GroundAtomsNode(qnode, clause.ground_positive, False)
+    return qnode
 
 
 def _get_dependency_graph(
@@ -195,7 +205,7 @@ def _get_query_engine_code(
     # print(evaluator_code)
     # print()
     # print()
-    return compile(evaluator_code, "<string>", "exec")
+    return evaluator_code, compile(evaluator_code, "<string>", "exec")
 
 
 def _extract_eq_atom(
@@ -223,6 +233,22 @@ def _extract_eq_atom(
             atoms.append(atom)
 
 
+def _separate_ground_atoms(
+    source: Iterable[Atom], bounded_variables: dict[int, int]
+) -> tuple[list[Atom], list[GroundAtomRef]]:
+    ground_atoms = []
+    non_ground_atoms = []
+    for atom in source:
+        args = []
+        for var_id in atom.get_variables():
+            args.append(bounded_variables.get(var_id, None))
+        if None not in args:
+            ground_atoms.append(GroundAtomRef(atom.relation_id, args))
+        else:
+            non_ground_atoms.append(atom)
+    return non_ground_atoms, ground_atoms
+
+
 def _normalize_clause(
     clause: Clause, eq_relation: int, object_relation: int
 ) -> NormalizedClause:
@@ -236,25 +262,46 @@ def _normalize_clause(
     objs_neq = []
     _extract_eq_atom(clause.neg_body, negative, vars_neq, objs_neq, eq_relation)
 
-    num_variables = 0
-    for atom in itertools.chain([clause.head], positive, negative):
-        variables = atom.get_variables()
-        if len(variables) > 0:
-            num_variables = max(num_variables, max(variables) + 1)
-    for constr in clause.constraints:
-        variables = constr.expr.get_variables()
-        if len(variables) > 0:
-            num_variables = max(num_variables, max(variables) + 1)
+    var_to_objs = dict(objs_eq)
+    positive, ground_positive = _separate_ground_atoms(positive, var_to_objs)
+    negative, ground_negative = _separate_ground_atoms(negative, var_to_objs)
 
-    for varid in range(num_variables):
+    variables = set()
+    for atom in itertools.chain([clause.head], positive, negative):
+        variables = variables | set(atom.get_variables())
+    for constr in clause.constraints:
+        variables = variables | set(constr.expr.get_variables())
+    variables = dict(
+        (var, Constant(i, True)) for i, var in enumerate(sorted(variables))
+    )
+
+    assert all(((x in variables) == (y in variables) for x, y in vars_eq))
+    assert all(((x in variables) == (y in variables) for x, y in vars_neq))
+    assert all((x in variables) for x, _ in objs_neq)
+
+    head = clause.head.substitute_(variables)
+    positive = [atom.substitute_(variables) for atom in positive]
+    negative = [atom.substitute_(variables) for atom in negative]
+    vars_eq = [
+        (variables[x].id, variables[y].id) for (x, y) in vars_eq if x in variables
+    ]
+    vars_neq = [
+        (variables[x].id, variables[y].id) for (x, y) in vars_neq if x in variables
+    ]
+    objs_eq = [(variables[x].id, y) for (x, y) in objs_eq if x in variables]
+    objs_neq = [(variables[x].id, y) for (x, y) in objs_neq]
+
+    for varid in range(len(variables)):
         if not any((varid in atom.get_variables() for atom in positive)):
             positive.append(Atom(object_relation, [Constant(varid, True)]))
 
     return NormalizedClause(
-        clause.head,
-        num_variables,
+        head,
+        len(variables),
         positive,
         negative,
+        ground_positive,
+        ground_negative,
         vars_eq,
         vars_neq,
         objs_eq,
@@ -272,7 +319,7 @@ class DatalogEngine:
     ):
         self.num_relations = program.num_relations() + 1
         self.object_relation = program.num_relations()
-        self.code = _get_query_engine_code(
+        self.code, self.bin = _get_query_engine_code(
             self.num_relations,
             list(
                 _normalize_clause(
@@ -297,6 +344,6 @@ class DatalogEngine:
             env[RELATIONS][atom.relation_id].add(
                 tuple((arg.id for arg in atom.arguments))
             )
-        exec(self.code, env)
+        exec(self.bin, env)
         del env[RELATIONS][self.object_relation]
         return env[RELATIONS]
