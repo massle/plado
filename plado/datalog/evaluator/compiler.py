@@ -231,6 +231,8 @@ def get_fluent_arguments(fluent: datalog.Fluent, get_value: VariableSubscripts) 
     args = [None] * len(fluent.args)
     for var, pos in fluent.variables:
         args[pos] = var
+    if len(args) == 0:
+        return "tuple()"
     return f"({', '.join((get_value(arg) for arg in args))},)"
 
 
