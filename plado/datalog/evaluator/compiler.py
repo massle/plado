@@ -67,6 +67,15 @@ class Assign(InstructionNode):
         return self._indent(depth, f"{self.dest} = {self.src}")
 
 
+class CloneSet(InstructionNode):
+    def __init__(self, dest: str, src: str):
+        self.dest: str = dest
+        self.src: str = src
+
+    def to_string(self, depth: int = 0) -> str:
+        return self._indent(depth, f"{self.dest} = set({self.src})")
+
+
 class MakeSet(InstructionNode):
     def __init__(self, register: str):
         self.register: str = register
@@ -1724,6 +1733,10 @@ def get_relation_delta(relation: int):
     return f"_delta{relation}"
 
 
+def get_previous_relation(relation: int):
+    return f"_relations_prev{relation}"
+
+
 def get_relation_delta_primed(relation: int):
     return f"_delta_prime{relation}"
 
@@ -1830,8 +1843,7 @@ def compile_interdepending(
             # relation
             return ConditionalInstruction(
                 Insert(get_relation_delta_primed(relation), tupl),
-                f"{tupl} not in {get_relation_delta(relation)}"
-                f" and {tupl} not in {lookup_relation(relation)}",
+                f"{tupl} not in {lookup_relation(relation)}",
             )
 
         return handle
@@ -1868,9 +1880,6 @@ def compile_interdepending(
 
     # initialize delta and delta'
     program.instructions.extend(
-        [MakeSet(get_relation_delta(r)) for r in build_data.dynamic_relations]
-    )
-    program.instructions.extend(
         [MakeSet(get_relation_delta_primed(r)) for r in build_data.dynamic_relations]
     )
 
@@ -1899,7 +1908,11 @@ def compile_interdepending(
     # first step: merge delta with relations; move delta_prime into delta; reset
     # delta_prime
     program.instructions.extend([
-        MergeSet(lookup_relation(r), get_relation_delta(r))
+        CloneSet(get_previous_relation(r), lookup_relation(r))
+        for r in build_data.dynamic_relations
+    ])
+    program.instructions.extend([
+        MergeSet(lookup_relation(r), get_relation_delta_primed(r))
         for r in build_data.dynamic_relations
     ])
     program.instructions.extend([
@@ -1912,14 +1925,17 @@ def compile_interdepending(
 
     class GetRelationOrDelta:
         def __init__(self, pos: int):
-            self.counter: int = pos
+            self.idx: int = 0
+            self.pos: int = pos
 
         def __call__(self, relation_id: int):
             if relation_id not in build_data.dynamic_relations:
                 return lookup_relation(relation_id)
-            self.counter -= 1
-            if self.counter == -1:
+            self.idx += 1
+            if self.idx - 1 == self.pos:
                 return get_relation_delta(relation_id)
+            if self.idx - 1 > self.pos:
+                return get_previous_relation(relation_id)
             return lookup_relation(relation_id)
 
     # generate inner loop join code:
@@ -1941,10 +1957,9 @@ def compile_interdepending(
         f"len({get_relation_delta_primed(r)}) > 0" for r in build_data.dynamic_relations
     ))
     instructions.append(WhileLoop(condition, InstructionSequence(program.instructions)))
-    instructions.extend([
-        MergeSet(lookup_relation(r), get_relation_delta(r))
-        for r in build_data.dynamic_relations
-    ])
+    instructions.extend(
+        [DelInstruction(get_previous_relation(r)) for r in build_data.dynamic_relations]
+    )
     instructions.extend(
         [DelInstruction(get_relation_delta(r)) for r in build_data.dynamic_relations]
     )
