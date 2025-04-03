@@ -652,11 +652,10 @@ class Task:
         efacts = [set(tupls) for tupls in facts]
         efacts.extend((set() for _ in range(self.num_derived_predicates)))
         efacts.extend(self.static_facts)
+        assert len(efacts) == len(self.predicates)
         efacts.extend((set() for _ in range(len(self.functions))))
         for func, fls in enumerate(fluents):
             efacts[len(self.predicates) + func] = set(fls.keys())
-        s = State(0, 0)
-        s.atoms = efacts[: len(self.predicates)]
         return efacts, fluents
 
     def dump_state(self, state: State, end: str = " ") -> str:
